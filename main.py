@@ -13,7 +13,7 @@ logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s
 BOT_TOKEN = "8648927877:AAGhq2GOlWfnnNaPon7wUcBtcbijSOvlxrs"
 ADMIN_IDS = [7978295530, 7010155909]
 IST = pytz.timezone('Asia/Kolkata')
-CHANNEL_ID = -1003792610411 
+CHANNEL_ID = -1003920368665 
 
 # --- MATCH DATA (IPL & PSL 2026) ---
 IPL_SCHEDULE = {
