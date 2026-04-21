@@ -207,7 +207,7 @@ async def set_color(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # --- MAIN ---
 async def post_init(app: Application):
     scheduler = AsyncIOScheduler()
-    scheduler.add_job(declare_color_result, 'interval', minutes=5, args=[app])
+    scheduler.add_job(declare_color_result, 'interval', minutes=2, args=[app])
     scheduler.start()
 
 def main():
