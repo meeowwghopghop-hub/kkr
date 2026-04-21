@@ -10,7 +10,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
 # --- CONFIG ---
-BOT_TOKEN = "8694462304:AAHSibwJqVMLMnJLo-66twdcJhB-TIkG8ZM"
+BOT_TOKEN = "8648927877:AAGhq2GOlWfnnNaPon7wUcBtcbijSOvlxrs"
 ADMIN_IDS = [7978295530, 7010155909]
 IST = pytz.timezone('Asia/Kolkata')
 CHANNEL_ID = -1003792610411 
