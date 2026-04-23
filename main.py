@@ -15,7 +15,7 @@ logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s
 
 # --- CONFIG ---
 BOT_TOKEN = "8694462304:AAHSibwJqVMLMnJLo-66twdcJhB-TIkG8ZM"
-ADMIN_IDS = [7978295530, 6987036375]
+ADMIN_IDS = [7978295530]
 IST = pytz.timezone('Asia/Kolkata')
 CHANNEL_ID = -1003920368665 # Result channel
 
