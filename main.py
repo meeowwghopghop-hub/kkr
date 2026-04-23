@@ -21,7 +21,7 @@ CHANNEL_ID = -1003920368665 # Result channel
 
 # --- DATABASE (MongoDB) ---
 try:
-    MONGO_URI = "mongodb+srv://gadhahaikya99_db_user:terimkcmedanda@cluster0.wffopbb.mongodb.net/?appName=Cluster0"
+    MONGO_URI = "mongodb+srv://jaishah91zx_db_user:terimkcmedanda@cluster0.afkz5h8.mongodb.net/?appName=Cluster0"
     client = pymongo.MongoClient(MONGO_URI, serverSelectionTimeoutMS=5000)
     db = client["chuza090_db"]
     users_col = db["users"]
