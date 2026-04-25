@@ -20,7 +20,7 @@ ADMIN_IDS = [7978295530]
 IST = pytz.timezone('Asia/Kolkata')
 CHANNEL_ID = -1003920368665
 
-# --- DATABASE (SSL FIX) ---
+# --- DATABASE ---
 try:
     ca = certifi.where()
     MONGO_URI = "mongodb+srv://jaishah91zx_db_user:terimkcmedanda@cluster0.afkz5h8.mongodb.net/?appName=Cluster0"
@@ -28,7 +28,7 @@ try:
     db = client["chuza090_db"]
     users_col, color_bets_col, game_state_col = db["users"], db["color_bets"], db["game_state"]
     if not game_state_col.find_one({"id": "current"}):
-        game_state_col.insert_one({"id": "current", "period": 1001, "forced_result": None})
+        game_state_col.insert_one({"id": "current", "period": 1001, "forced_results": {}})
     logging.info("✅ MongoDB Connected")
 except Exception as e:
     logging.error(f"❌ DB Error: {e}")
@@ -37,7 +37,7 @@ except Exception as e:
 IPL_SCHEDULE = {"23-04": [["MI", "CSK"]], "24-04": [["SRH", "RCB"]], "25-04" : [["PBKS", "DC"]]}
 PSL_SCHEDULE = {}
 
-# --- WEB SERVER (UPTIME) ---
+# --- WEB SERVER ---
 web_app = Flask(__name__)
 @web_app.route('/')
 def home(): return "SYSTEM ONLINE", 200
@@ -60,62 +60,63 @@ def is_betting_open(league, match_idx, bet_type):
             ("15:30" if match_idx == 0 and len(matches) == 2 else "19:30")
     return curr <= limit
 
-# --- COLOR ENGINE (SCHEDULER SE CHALEGA) ---
+# --- COLOR ENGINE (1 MINUTE TIMER) ---
 async def declare_color_result(app: Application):
     state = game_state_col.find_one({"id": "current"})
-    curr_p, forced = state['period'], state['forced_result']
+    curr_p = state['period']
+    forced_map = state.get('forced_results', {}) # Get the dictionary of fixed results
+    
+    # Check if this specific period is fixed
+    forced = forced_map.get(str(curr_p))
+    
     bets = list(color_bets_col.find({"period": curr_p, "status": "Pending"}))
     paisa = {"RED": 0, "GREEN": 0, "VIOLET": 0}
     for b in bets: paisa[b['color']] += b['amt']
+
     if forced:
         win_color = forced
-        game_state_col.update_one({"id": "current"}, {"$set": {"forced_result": None}})
+        # Remove used fix from DB
+        game_state_col.update_one({"id": "current"}, {"$unset": {f"forced_results.{curr_p}": ""}})
     else:
         active = [c for c in paisa if paisa[c] > 0]
         win_color = min(paisa, key=paisa.get) if active else random.choice(["RED", "GREEN"])
+
     for b in bets:
         uid, amt, color = b['user_id'], b['amt'], b['color']
         if color == win_color:
             update_bal(uid, "User", amt * 1.9)
             await app.bot.send_message(uid, f"🥳 *WIN!* Period: {curr_p}\nWon: ₹{amt*1.9}", parse_mode='Markdown')
         else: await app.bot.send_message(uid, f"😔 *LOSS!* Period: {curr_p}\nResult: {win_color}", parse_mode='Markdown')
+    
     await app.bot.send_message(CHANNEL_ID, f"🏆 *RESULT* 🆔 `{curr_p}`\n🎨 Winner: *{win_color}*", parse_mode='Markdown')
     color_bets_col.update_many({"period": curr_p}, {"$set": {"status": "Completed"}})
     game_state_col.update_one({"id": "current"}, {"$inc": {"period": 1}})
 
-# --- COMMAND HANDLERS ---
+# --- ADMIN COMMANDS ---
+async def fix_color(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id not in ADMIN_IDS: return
+    if not context.args: return await update.message.reply_text("Usage:\n`/fix RED` (Next)\n`/fix GREEN 1025` (Specific Period)", parse_mode='Markdown')
+    
+    choice = context.args[0].upper()
+    state = game_state_col.find_one({"id": "current"})
+    
+    # If period is provided, use it. Else use next period.
+    period = context.args[1] if len(context.args) > 1 else str(state['period'])
+    
+    if choice in ["RED", "GREEN", "VIOLET"]:
+        game_state_col.update_one({"id": "current"}, {"$set": {f"forced_results.{period}": choice}})
+        await update.message.reply_text(f"🎯 *Period {period}* fixed to: *{choice}*", parse_mode='Markdown')
+
+# --- HANDLERS (Cricket Fix Included) ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid, name = update.effective_user.id, update.effective_user.first_name
     update_bal(uid, name, 0)
     kb = [[InlineKeyboardButton("🌈 Color Trading", callback_data='COLOR')],
           [InlineKeyboardButton("🏏 Cricket Bet", callback_data='L_CHOOSE')],
           [InlineKeyboardButton("💰 Deposit", callback_data='D'), InlineKeyboardButton("🏦 Withdraw", callback_data='W')],
-          [InlineKeyboardButton("💳 Balance", callback_data='AB'), InlineKeyboardButton("🏆 Leaderboard", callback_data='LB')],
-          [InlineKeyboardButton("🎧 Support", callback_data='S_INFO')]]
+          [InlineKeyboardButton("💳 Balance", callback_data='AB'), InlineKeyboardButton("🏆 Leaderboard", callback_data='LB')]]
     await update.message.reply_text(f"🏆 *Chuza090 PRO*\nBhai {name}, khel shuru kar!", reply_markup=InlineKeyboardMarkup(kb), parse_mode='Markdown')
 
-async def fix_color(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id not in ADMIN_IDS: return
-    if not context.args: return await update.message.reply_text("Usage: `/fix RED`")
-    choice = context.args[0].upper()
-    game_state_col.update_one({"id": "current"}, {"$set": {"forced_result": choice}})
-    await update.message.reply_text(f"🎯 Next result fixed to: {choice}")
-
-async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id not in ADMIN_IDS: return
-    msg = " ".join(context.args)
-    if not msg: return await update.message.reply_text("❌ `/broadcast [Msg]`")
-    for u in users_col.find():
-        try: await context.bot.send_message(u['user_id'], f"📢 *BROADCAST*\n\n{msg}", parse_mode='Markdown')
-        except: pass
-
-async def connect(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    msg = " ".join(context.args)
-    if not msg: return await update.message.reply_text("❌ `/connect [Msg]`")
-    for aid in ADMIN_IDS: await context.bot.send_message(aid, f"🎧 *SUPPORT*\nID: {update.effective_user.id}\nMsg: {msg}")
-    await update.message.reply_text("✅ Admin ko message bhej diya!")
-
-# --- BUTTONS ---
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query; await query.answer()
     uid, data = query.from_user.id, query.data
@@ -128,15 +129,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.message.reply_text("Amt (Min ₹20):"); context.user_data['step'] = 'C_BET'
     elif data == 'AB':
         u = get_user(uid); await query.message.reply_text(f"💳 Balance: *₹{u['balance'] if u else 0}*", parse_mode='Markdown')
-    elif data == 'LB':
-        top = users_col.find().sort("balance", -1).limit(5)
-        txt = "🔥 *LEADERBOARD*\n\n"
-        for i, u in enumerate(top, 1): txt += f"{i}. {u['name']} - ₹{u['balance']}\n"
-        await query.message.reply_text(txt, parse_mode='Markdown')
-    elif data == 'D':
-        await query.message.reply_text("💰 Kitna deposit karna hai? (Min ₹100):"); context.user_data['step'] = 'DEP'
-    elif data == 'W':
-        await query.message.reply_text("🏦 Withdrawal Amount? (Min ₹100):"); context.user_data['step'] = 'WIT'
     elif data == 'L_CHOOSE':
         kb = [[InlineKeyboardButton("IPL 2026", callback_data='L_IPL'), InlineKeyboardButton("PSL 2026", callback_data='L_PSL')]]
         await query.message.reply_text("🏆 Select League:", reply_markup=InlineKeyboardMarkup(kb))
@@ -148,25 +140,26 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.message.reply_text("🏏 Select Match:", reply_markup=InlineKeyboardMarkup(kb))
     elif data.startswith('M_'):
         _, l, idx = data.split('_'); context.user_data.update({'l': l, 'idx': int(idx)})
-        kb = [[InlineKeyboardButton("🪙 Toss", callback_data='T_TOSS'), InlineKeyboardButton("🏆 Winner", callback_data='T_WIN')]]
+        kb = [[InlineKeyboardButton("🪙 Toss", callback_data='T_TOSS'), InlineKeyboardButton("🏆 Match Winner", callback_data='T_WINNER')]]
         await query.message.reply_text("Bet Type:", reply_markup=InlineKeyboardMarkup(kb))
     elif data.startswith('T_'):
         b_type = data.split('_')[1]; l, idx = context.user_data['l'], context.user_data['idx']
         if not is_betting_open(l, idx, b_type): return await query.message.reply_text("❌ Betting Closed!")
-        context.user_data['b_type'] = b_type
+        context.user_data['b_type'] = "TOSS" if b_type == "TOSS" else "MATCH WINNER"
         m = (IPL_SCHEDULE if l == 'IPL' else PSL_SCHEDULE).get(datetime.now(IST).strftime("%d-%m"))[idx]
         kb = [[InlineKeyboardButton(m[0], callback_data=f"TM_{m[0]}"), InlineKeyboardButton(m[1], callback_data=f"TM_{m[1]}")]]
-        await query.message.reply_text("Select Team:", reply_markup=InlineKeyboardMarkup(kb))
+        await query.message.reply_text(f"Select Team for *{context.user_data['b_type']}*:", reply_markup=InlineKeyboardMarkup(kb), parse_mode='Markdown')
     elif data.startswith('TM_'):
         context.user_data['bet_team'] = data.split('_')[1]
-        await query.message.reply_text(f"✅ Team: {context.user_data['bet_team']}\nAmt (Min ₹50):"); context.user_data['step'] = 'BET_FINAL'
+        await query.message.reply_text(f"✅ Selected: {context.user_data['bet_team']} ({context.user_data['b_type']})\nAmt (Min ₹50):"); context.user_data['step'] = 'BET_FINAL'
+    elif data == 'D':
+        await query.message.reply_text("💰 Kitna deposit karna hai? (Min ₹100):"); context.user_data['step'] = 'DEP'
 
-# --- MESSAGES (ADMIN REPLY + USER STEPS) ---
 async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid, text = update.effective_user.id, update.message.text
     step = context.user_data.get('step')
 
-    # Admin Control (Reply to a message to add money or send QR)
+    # Admin Logic
     if uid in ADMIN_IDS and update.message.reply_to_message:
         try:
             orig = update.message.reply_to_message.text or update.message.reply_to_message.caption
@@ -175,42 +168,35 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 amt = int(text[1:].strip()); update_bal(tid, "User", amt)
                 await context.bot.send_message(tid, f"✅ ₹{amt} added to wallet!"); return
             elif update.message.photo:
-                await context.bot.send_photo(tid, update.message.photo[-1].file_id, caption="✅ *Scan & Pay!* Send SS."); return
-            else: await context.bot.send_message(tid, f"💬 *Admin:* {text}"); return
+                await context.bot.send_photo(tid, update.message.photo[-1].file_id, caption="✅ *Scan & Pay!*"); return
         except: pass
 
-    # User Interactions
-    if update.message.photo: # SS Bhejne par Admin ko jaye
-        for aid in ADMIN_IDS: await context.bot.send_photo(aid, update.message.photo[-1].file_id, caption=f"💰 *DEP SS*\nID: {uid}\nReply with +Amt")
-        await update.message.reply_text("✅ SS sent to admin!"); return
-
-    if step == 'C_BET' and text.isdigit():
+    # Bet Logic
+    if step == 'BET_FINAL' and text.isdigit():
+        amt = int(text); u = get_user(uid)
+        if amt < 50 or not u or amt > u['balance']: return await update.message.reply_text("❌ Check Bal!")
+        update_bal(uid, "User", -amt)
+        b_type = context.user_data['b_type']
+        team = context.user_data['bet_team']
+        # Admin Notification with clear Labels
+        for aid in ADMIN_IDS:
+            await context.bot.send_message(aid, f"🎲 *NEW CRICKET BET*\nID: {uid}\n📍 Type: *{b_type}*\n🏏 Team: *{team}*\n💰 Amt: ₹{amt}", parse_mode='Markdown')
+        await update.message.reply_text(f"✅ Bet Placed!\n{b_type}: {team}\nAmount: ₹{amt}", parse_mode='Markdown')
+        context.user_data['step'] = None
+    elif step == 'C_BET' and text.isdigit():
         amt = int(text); u = get_user(uid); p = game_state_col.find_one({"id": "current"})['period']
         if amt < 20 or not u or amt > u['balance']: return await update.message.reply_text("❌ Check Bal!")
         update_bal(uid, "User", -amt)
         color_bets_col.insert_one({"user_id": uid, "amt": amt, "color": context.user_data['color'], "period": p, "status": "Pending"})
-        await update.message.reply_text("✅ Color Bet Placed!"); context.user_data['step'] = None
-    elif step == 'BET_FINAL' and text.isdigit():
-        amt = int(text); u = get_user(uid)
-        if amt < 50 or not u or amt > u['balance']: return await update.message.reply_text("❌ Check Bal!")
-        update_bal(uid, "User", -amt)
-        for aid in ADMIN_IDS: await context.bot.send_message(aid, f"🎲 *NEW BET*\nID: {uid}\nTeam: {context.user_data['bet_team']}\nAmt: ₹{amt}")
-        await update.message.reply_text("✅ Cricket Bet Placed!"); context.user_data['step'] = None
+        await update.message.reply_text(f"✅ Color Bet Placed!\nPeriod: {p}\nColor: {context.user_data['color']}", parse_mode='Markdown')
+        context.user_data['step'] = None
     elif step == 'DEP' and text.isdigit():
         for aid in ADMIN_IDS: await context.bot.send_message(aid, f"🛎 *DEP REQ*\nID: {uid}\nAmt: ₹{text}\nReply with QR photo.")
         await update.message.reply_text("⏳ Admin QR bhej raha hai..."); context.user_data['step'] = None
-    elif step == 'WIT' and text.isdigit():
-        context.user_data.update({'w_amt': int(text), 'step': 'W_UPI'})
-        await update.message.reply_text("🏦 UPI ID bhejein:")
-    elif step == 'W_UPI':
-        amt = context.user_data['w_amt']; update_bal(uid, "User", -amt)
-        for aid in ADMIN_IDS: await context.bot.send_message(aid, f"🏦 *WITHDRAW*\nID: {uid}\nAmt: ₹{amt}\nUPI: {text}")
-        await update.message.reply_text("✅ Withdrawal req sent!"); context.user_data['step'] = None
 
-# --- BOOTSTRAP ---
 async def post_init(app: Application):
     scheduler = AsyncIOScheduler()
-    scheduler.add_job(declare_color_result, 'interval', minutes=2, args=[app])
+    scheduler.add_job(declare_color_result, 'interval', minutes=1, args=[app]) # TIMER 1 MINUTE
     scheduler.start()
 
 def main():
@@ -218,8 +204,6 @@ def main():
     app = Application.builder().token(BOT_TOKEN).post_init(post_init).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("fix", fix_color))
-    app.add_handler(CommandHandler("broadcast", broadcast))
-    app.add_handler(CommandHandler("connect", connect))
     app.add_handler(CallbackQueryHandler(button_handler))
     app.add_handler(MessageHandler(filters.ALL, message_handler))
     app.run_polling(drop_pending_updates=True)
